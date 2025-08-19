@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>加權指數 K 線回放（v9.5 自動抓取＋Crosshair＋扣抵修正）</title>
+<style>
+  :root{--bg:#0b0f19;--panel:#121828;--text:#e6edf3;--muted:#9fb3c8;--accent:#3ea6ff;--up:#ef4444;--down:#10b981;--grid:#24324a}
+  *{box-sizing:border-box}
+  body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC",Arial}
+  .wrap{display:grid;grid-template-rows:1fr auto;height:100vh}
+  .charts{display:grid;grid-template-rows:500px 240px;gap:4px;padding:10px;position:relative}
+  canvas{background:#0a1324;border:1px solid #1f2937;border-radius:6px;width:100%;height:100%}
+  .controls{background:#121828;padding:8px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:center;border-top:1px solid #1f2937}
+  button,select{background:#0f172a;color:var(--text);border:1px solid #263248;border-radius:6px;padding:4px 8px;cursor:pointer}
+  button:hover,select:hover{border-color:var(--accent)}
+  .on{color:#3ea6ff;border-color:#3ea6ff}
+  .tooltip{position:absolute;left:12px;top:44px;background:rgba(30,41,59,0.9);padding:6px 10px;border-radius:6px;font-size:14px;line-height:1.4;white-space:pre-line}
+  .mode-label{position:absolute;right:12px;top:12px;background:rgba(62,166,255,0.2);color:#3ea6ff;padding:4px 8px;border-radius:4px;font-size:13px;font-weight:bold}
+  .settings-panel{position:absolute;top:50px;right:12px;background:rgba(18,24,40,0.95);border:1px solid #263248;border-radius:8px;padding:15px;width:280px;max-height:400px;overflow-y:auto;display:none;z-index:1000}
+  .settings-group{margin-bottom:15px}
+  .settings-group h4{margin:0 0 8px 0;color:#3ea6ff;font-size:12px;text-transform:uppercase;letter-spacing:0.5px}
+  .setting-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px}
+  .setting-row label{min-width:30px;color:#9fb3c8}
+  .setting-row input[type="number"]{width:50px;background:#0f172a;border:1px solid #263248;color:#e6edf3;padding:2px 4px;border-radius:3px}
+  .setting-row input[type="color"]{width:30px;height:20px;border:none;border-radius:3px;cursor:pointer}
+  .setting-row input[type="range"]{flex:1;background:#0f172a}
+  .settings-btn{position:absolute;right:50px;top:12px;background:rgba(18,24,40,0.8);color:#9fb3c8;border:1px solid #263248;padding:4px 8px;border-radius:4px;font-size:12px;cursor:pointer}
+  .settings-btn:hover{border-color:#3ea6ff;color:#3ea6ff}
+  .status{position:absolute;left:12px;top:12px;background:rgba(18,24,40,0.9);color:#9fb3c8;border:1px solid #263248;border-radius:6px;padding:6px 10px;font-size:12px}
+  .status.ok{color:#10b981;border-color:#10b981}
+  .status.warn{color:#f59e0b;border-color:#f59e0b}
+  .status.err{color:#ef4444;border-color:#ef4444}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="charts">
+    <canvas id="price"></canvas>
+    <canvas id="volume"></canvas>
+    <div id="status" class="status">初始化…</div>
+    <div id="tooltip" class="tooltip"></div>
+    <div id="modeLabel" class="mode-label" style="display:none;">REPLAY MODE</div>
+    <button id="settingsBtn" class="settings-btn">⚙️ 設定</button>
+    <div id="settingsPanel" class="settings-panel">
+      <div class="settings-group">
+        <h4>移動平均線 (MA)</h4>
+        <div class="setting-row">
+          <label>MA1:</label>
+          <input type="number" id="ma1Period" value="8" min="1" max="200">
+          <input type="color" id="ma1Color" value="#ffff00">
+          <input type="range" id="ma1Width" min="1" max="5" value="1">
+        </div>
+        <div class="setting-row">
+          <label>MA2:</label>
+          <input type="number" id="ma2Period" value="21" min="1" max="200">
+          <input type="color" id="ma2Color" value="#00ffff">
+          <input type="range" id="ma2Width" min="1" max="5" value="1">
+        </div>
+        <div class="setting-row">
+          <label>MA3:</label>
+          <input type="number" id="ma3Period" value="55" min="1" max="200">
+          <input type="color" id="ma3Color" value="#ee82ee">
+          <input type="range" id="ma3Width" min="1" max="5" value="1">
+        </div>
+      </div>
+      <div class="settings-group">
+        <h4>成交量移動平均 (MV)</h4>
+        <div class="setting-row">
+          <label>MV1:</label>
+          <input type="number" id="mv1Period" value="5" min="1" max="200">
+          <input type="color" id="mv1Color" value="#ffa500">
+          <input type="range" id="mv1Width" min="1" max="5" value="1">
+        </div>
+        <div class="setting-row">
+          <label>MV2:</label>
+          <input type="number" id="mv2Period" value="13" min="1" max="200">
+          <input type="color" id="mv2Color" value="#00ffff">
+          <input type="range" id="mv2Width" min="1" max="5" value="1">
+        </div>
+        <div class="setting-row">
+          <label>MV3:</label>
+          <input type="number" id="mv3Period" value="34" min="1" max="200">
+          <input type="color" id="mv3Color" value="#ffffff">
+          <input type="range" id="mv3Width" min="1" max="5" value="1">
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="replay">Replay OFF</button>
+    <button id="rewind">⏪</button>
+    <button id="play">▶</button>
+    <button id="step">⏩</button>
+    <label>速度
+      <select id="speed">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="5">5x</option>
+        <option value="10">10x</option>
+      </select>
+    </label>
+    <button id="reset">Reset</button>
+    <button id="reload">重新抓取</button>
+    <button id="loadData">載入示例數據</button>
+    <label>週期
+      <select id="timeframe">
+        <option value="daily" selected>日K</option>
+        <option value="weekly">週K</option>
+      </select>
+    </label>
+  </div>
+</div>
+
+<script>
+(function(){
+  const dom={
+    replay:document.getElementById('replay'),play:document.getElementById('play'),step:document.getElementById('step'),
+    rewind:document.getElementById('rewind'),reset:document.getElementById('reset'),speed:document.getElementById('speed'),
+    price:document.getElementById('price'),volume:document.getElementById('volume'),tooltip:document.getElementById('tooltip'),modeLabel:document.getElementById('modeLabel'),
+    loadData:document.getElementById('loadData'),reload:document.getElementById('reload'),status:document.getElementById('status'),
+    settingsBtn:document.getElementById('settingsBtn'),settingsPanel:document.getElementById('settingsPanel'),
+    ma1Period:document.getElementById('ma1Period'),ma1Color:document.getElementById('ma1Color'),ma1Width:document.getElementById('ma1Width'),
+    ma2Period:document.getElementById('ma2Period'),ma2Color:document.getElementById('ma2Color'),ma2Width:document.getElementById('ma2Width'),
+    ma3Period:document.getElementById('ma3Period'),ma3Color:document.getElementById('ma3Color'),ma3Width:document.getElementById('ma3Width'),
+    mv1Period:document.getElementById('mv1Period'),mv1Color:document.getElementById('mv1Color'),mv1Width:document.getElementById('mv1Width'),
+    mv2Period:document.getElementById('mv2Period'),mv2Color:document.getElementById('mv2Color'),mv2Width:document.getElementById('mv2Width'),
+    mv3Period:document.getElementById('mv3Period'),mv3Color:document.getElementById('mv3Color'),mv3Width:document.getElementById('mv3Width'),
+    timeframe:document.getElementById('timeframe')
+  };
+
+  let data=[],processedData=[],playing=false,timer=null;
+  let viewSize=120,viewOffset=0;
+  let cutIndex=null,stepCount=0; 
+  let replayMode=false; 
+  let hoverIndex=null;
+  let crosshairMode=false, crossIndex=null;
+  let cursorY=null;
+  let interval=1000, last=0;
+
+  function setStatus(msg,cls=''){ dom.status.textContent=msg; dom.status.className='status '+cls; }
+
+  // 內建示例（保底）
+  const sampleData = `Date,Open,High,Low,Close,Volume
+1996/1/3,7800.25,7845.67,7765.33,7825.44,25000
+1996/1/4,7825.44,7880.12,7798.67,7856.89,23000
+1996/1/5,7856.89,7912.33,7825.44,7895.67,21000
+1996/1/8,7900.12,7955.33,7888.77,7944.20,22000
+1996/1/9,7944.20,7988.11,7920.33,7960.50,20000`;
+
+  // 固定資料來源（依你要求）
+  const SRC = "https://r.jina.ai/http://stooq.com/q/d/l/?s=%5Etwse&i=d";
+
+  async function autoFetch(){
+    try{
+      setStatus('開始抓取 TAIEX (^TWSE)…','warn');
+      const res = await fetch(SRC, {cache: 'no-store'});
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      let txt = await res.text();
+      // 移除 BOM與雜訊；若被 <pre> 包裹，抽內容；從第一個 Date 行開始
+      txt = txt.replace(/^\uFEFF/, '');
+      const pre = txt.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+      if(pre) txt = pre[1];
+      const idx = txt.search(/(^|\n)Date[,\t]/i);
+      if(idx>0) txt = txt.slice(idx).trim();
+      const parsed = parseCSV(txt);
+      if(parsed.length < 30) throw new Error('資料筆數不足：'+parsed.length);
+      data = parsed;
+      updateProcessedData(); draw();
+      setStatus(`自動載入完成，筆數：${data.length}`,'ok');
+    }catch(err){
+      console.error(err);
+      setStatus('⚠️ 無法自動載入（'+(err && err.message? err.message : '未知錯誤')+'）。已載入示例。','err');
+      data = parseCSV(sampleData); updateProcessedData(); draw();
+    }
+  }
+
+  function convertToWeekly(dailyData) {
+    if (dailyData.length === 0) return [];
+    const weekly = []; let currentWeek = null;
+    dailyData.forEach(day => {
+      const date = new Date(day.date);
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - date.getDay()); // 週日開始
+      const weekKey = weekStart.toISOString().slice(0, 10);
+      if (!currentWeek || currentWeek.weekKey !== weekKey) {
+        if (currentWeek) weekly.push({date: currentWeek.endDate, o: currentWeek.open, h: currentWeek.high, l: currentWeek.low, c: currentWeek.close, v: currentWeek.volume});
+        currentWeek = {weekKey, startDate: day.date, endDate: day.date, open: day.o, high: day.h, low: day.l, close: day.c, volume: day.v};
+      } else {
+        currentWeek.endDate = day.date;
+        currentWeek.high = Math.max(currentWeek.high, day.h);
+        currentWeek.low = Math.min(currentWeek.low, day.l);
+        currentWeek.close = day.c;
+        currentWeek.volume += day.v;
+      }
+    });
+    if (currentWeek) weekly.push({date: currentWeek.endDate, o: currentWeek.open, h: currentWeek.high, l: currentWeek.low, c: currentWeek.close, v: currentWeek.volume});
+    return weekly;
+  }
+
+  function updateProcessedData() {
+    if (dom.timeframe.value === 'weekly') processedData = convertToWeekly(data);
+    else processedData = [...data];
+    viewOffset = 0; cutIndex = null; stepCount = 0;
+  }
+
+  function parseCSV(text){
+    const lines=text.replace(/\r/g,'\n').split('\n').filter(x=>x.trim().length>0);
+    if(lines.length<2) return [];
+    const head=lines[0].split(/[\t,]/).map(s=>s.trim().toLowerCase());
+    function get(row,k){const i=head.indexOf(k);return i>=0?row[i]:null}
+    const out=[];
+    for(let i=1;i<lines.length;i++){
+      const row=lines[i].split(/[\t,]/).map(s=>s.trim());
+      if(row.length < head.length) continue;
+      let d=get(row,'date'); if(!d) continue;
+      d=d.replace(/\//g,'-');
+      let parts=d.split('-'); if(parts[1] && parts[1].length===1) parts[1]='0'+parts[1]; if(parts[2] && parts[2].length===1) parts[2]='0'+parts[2];
+      d=parts.join('-');
+      const o=Math.round(parseFloat(get(row,'open')));
+      const h=Math.round(parseFloat(get(row,'high')));
+      const l=Math.round(parseFloat(get(row,'low')));
+      const c=Math.round(parseFloat(get(row,'close')));
+      const v=Math.round(parseFloat(get(row,'volume')||'0'))||0;
+      if(!isFinite(o)||!isFinite(h)||!isFinite(l)||!isFinite(c)) continue;
+      out.push({date:d,o,h,l,c,v});
+    }
+    out.sort((a,b)=>a.date.localeCompare(b.date));
+    return out;
+  }
+
+  function SMA(arr, period, key){
+    const res=[];
+    for(let i=0;i<arr.length;i++){
+      if(i<period-1){
+        let sum=0;
+        for(let j=0;j<=i;j++){sum+=arr[j][key];}
+        res.push(sum/(i+1));
+        continue;
+      }
+      let sum=0;for(let j=0;j<period;j++){sum+=arr[i-j][key];}
+      res.push(sum/period);
+    }
+    return res;
+  }
+
+  function fitCanvas(c){
+    const dpr=window.devicePixelRatio||1;
+    const rect=c.getBoundingClientRect();
+    c.width=rect.width*dpr; c.height=rect.height*dpr;
+    const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+    return ctx;
+  }
+
+  function draw(){
+    const ctxP=fitCanvas(dom.price), ctxV=fitCanvas(dom.volume);
+    ctxP.fillStyle='#0a1324'; ctxP.fillRect(0,0,dom.price.clientWidth,dom.price.clientHeight);
+    ctxV.fillStyle='#0a1324'; ctxV.fillRect(0,0,dom.volume.clientWidth,dom.volume.clientHeight);
+    if(processedData.length===0){ctxP.fillStyle='#9fb3c8'; ctxP.fillText('尚無資料。',10,20); dom.tooltip.textContent=""; return;}
+
+    const end=processedData.length-viewOffset;
+    const start=Math.max(0,end-viewSize);
+    const show=processedData.slice(start,end);
+
+    const W=dom.price.clientWidth,H=dom.price.clientHeight;
+    const padL=50,padR=20,padT=15,padB=30;
+    const x0=padL,x1=W-padR,y0=padT,y1=H-padB;
+
+    if(show.length===0) return;
+    let min=Infinity,max=-Infinity;
+    for(const d of show){if(d.l<min)min=d.l;if(d.h>max)max=d.h;}
+    if(!isFinite(min)||!isFinite(max)||min===max){min=0;max=1;}
+    const n=show.length,w=Math.max((x1-x0)/Math.max(1,n),1);
+    function X(i){return x0+(i+0.5)*w}
+    function Y(v){return y1-(v-min)/(max-min)*(y1-y0)}
+
+    let lastVisible = show.length-1;
+    if(replayMode && cutIndex!==null){
+      lastVisible = Math.min(cutIndex+stepCount, show.length-1);
+    }
+
+    // 價格軸 + 網格
+    ctxP.fillStyle='#9fb3c8'; ctxP.font='11px monospace';
+    const priceStep = (max-min)/8;
+    for(let i=0;i<=8;i++){
+      const price = min + priceStep*i;
+      const y = Y(price);
+      ctxP.fillText(price.toFixed(0), 5, y+4);
+      ctxP.strokeStyle='#24324a'; ctxP.lineWidth=1;
+      ctxP.beginPath(); ctxP.moveTo(padL,y); ctxP.lineTo(x1,y); ctxP.stroke();
+    }
+
+    // K線
+    for(let i=0;i<=lastVisible;i++){
+      const d=show[i],x=X(i);
+      ctxP.strokeStyle='#cbd5e1'; ctxP.beginPath(); ctxP.moveTo(x,Y(d.h)); ctxP.lineTo(x,Y(d.l)); ctxP.stroke();
+      const up=d.c>=d.o; ctxP.fillStyle=up?'#ef4444':'#10b981';
+      const yOpen=Y(d.o), yClose=Y(d.c);
+      const hh=Math.abs(yClose-yOpen); const bw=Math.max(w*0.6,1);
+      ctxP.fillRect(x-bw/2,Math.min(yOpen,yClose),bw,Math.max(hh,1));
+    }
+
+    // 價圖均線
+    const ma1=SMA(show,+dom.ma1Period.value,'c'),ma2=SMA(show,+dom.ma2Period.value,'c'),ma3=SMA(show,+dom.ma3Period.value,'c');
+    function drawMA(arr,color,width){
+      ctxP.strokeStyle=color; ctxP.lineWidth=+width; ctxP.beginPath();
+      for(let i=0;i<=lastVisible;i++){
+        const x=X(i), y=Y(arr[i]);
+        if(i===0) ctxP.moveTo(x,y); else ctxP.lineTo(x,y);
+      }
+      ctxP.stroke();
+    }
+    drawMA(ma1,dom.ma1Color.value,dom.ma1Width.value); 
+    drawMA(ma2,dom.ma2Color.value,dom.ma2Width.value); 
+    drawMA(ma3,dom.ma3Color.value,dom.ma3Width.value);
+
+    // REPLAY 切割線
+    if(replayMode && cutIndex!==null){
+      const xLine = X(cutIndex);
+      ctxP.strokeStyle = '#3ea6ff';
+      ctxP.beginPath();
+      ctxP.moveTo(xLine, y0);
+      ctxP.lineTo(xLine, y1);
+      ctxP.stroke();
+    }
+
+    // 量圖
+    const HV=dom.volume.clientHeight,padB2=20,yBottom=HV-padB2,yTop=10;
+    let vmax=0; for(let i=0;i<=lastVisible;i++){if(show[i].v>vmax)vmax=show[i].v;}
+    function Yv(v){return yBottom-(v/(vmax||1))*(yBottom-yTop)}
+    for(let i=0;i<=lastVisible;i++){
+      const d=show[i],x=50+(i+0.1)*w,bw=Math.max(w*0.8,1);
+      ctxV.fillStyle=(d.c>=d.o)?'#ef4444':'#10b981';
+      ctxV.fillRect(x,Yv(d.v),bw,yBottom-Yv(d.v));
+    }
+    // 均量線
+    const mv1=SMA(show,+dom.mv1Period.value,'v'),mv2=SMA(show,+dom.mv2Period.value,'v'),mv3=SMA(show,+dom.mv3Period.value,'v');
+    function drawMV(arr,color,width){
+      ctxV.strokeStyle=color; ctxV.lineWidth=+width; ctxV.beginPath();
+      for(let i=0;i<=lastVisible;i++){
+        const x=50+(i+0.5)*w, y=Yv(arr[i]);
+        if(i===0) ctxV.moveTo(x,y); else ctxV.lineTo(x,y);
+      }
+      ctxV.stroke();
+    }
+    drawMV(mv1,dom.mv1Color.value,dom.mv1Width.value); 
+    drawMV(mv2,dom.mv2Color.value,dom.mv2Width.value); 
+    drawMV(mv3,dom.mv3Color.value,dom.mv3Width.value);
+
+    // X 軸日期
+    ctxP.fillStyle='#9fb3c8'; ctxP.font='11px monospace';
+    ctxV.fillStyle='#9fb3c8'; ctxV.font='11px monospace';
+    const dateStep = Math.max(1, Math.floor(n/8));
+    let lastYear = '';
+    for(let i=0;i<=lastVisible;i+=dateStep){
+      if(i>=show.length) break;
+      const x=X(i);
+      const currentYear = show[i].date.slice(0,4);
+      const currentDate = show[i].date.slice(5);
+      const dateText = (currentYear !== lastYear) ? (lastYear=currentYear) : currentDate;
+      ctxP.fillText(dateText,x-15,H-5);
+      ctxV.fillText(dateText,50+(i+0.5)*w-15,HV-5);
+    }
+
+    // Crosshair 與 扣抵（MV 扣抵改為上下緣）
+    if(crosshairMode){
+      const n2 = show.length;
+      if(n2>0 && crossIndex!=null && crossIndex>=0 && crossIndex<n2){
+        const Xp = i => x0+(i+0.5)*w;
+        const Xv = i => 50+(i+0.5)*w;
+
+        // 垂直線（價/量）
+        ctxP.strokeStyle='#3ea6ff'; ctxP.lineWidth=1;
+        ctxP.beginPath(); ctxP.moveTo(Xp(crossIndex), y0); ctxP.lineTo(Xp(crossIndex), y1); ctxP.stroke();
+        ctxV.strokeStyle='#3ea6ff';
+        ctxV.beginPath(); ctxV.moveTo(Xv(crossIndex), yTop); ctxV.lineTo(Xv(crossIndex), yBottom); ctxV.stroke();
+        // 價圖水平線跟滑鼠
+        if(cursorY!=null){ ctxP.beginPath(); ctxP.moveTo(x0, cursorY); ctxP.lineTo(x1, cursorY); ctxP.stroke(); }
+
+        // 扣抵三角
+        function tri(ctx, x, y, size, color, up=true){
+          ctx.fillStyle = color; ctx.strokeStyle='#121828'; ctx.lineWidth=1;
+          ctx.beginPath();
+          if(up){ ctx.moveTo(x, y - size); ctx.lineTo(x - size, y + size); ctx.lineTo(x + size, y + size); }
+          else { ctx.moveTo(x, y + size); ctx.lineTo(x - size, y - size); ctx.lineTo(x + size, y - size); }
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+        if(!replayMode){
+          // MA 扣抵：價圖上下緣
+          const periodsMA=[+dom.ma1Period.value,+dom.ma2Period.value,+dom.ma3Period.value];
+          const colorsMA=[dom.ma1Color.value,dom.ma2Color.value,dom.ma3Color.value];
+          periodsMA.forEach((P, idx)=>{
+            const k = crossIndex - P;
+            if(k>=0){
+              tri(ctxP, Xp(k), y0+8, 6, colorsMA[idx], false); // 上緣向下
+              tri(ctxP, Xp(k), y1-8, 6, colorsMA[idx], true);  // 下緣向上
+            }
+          });
+          // MV 扣抵：量圖上下緣（依你要求）
+          const periodsMV=[+dom.mv1Period.value,+dom.mv2Period.value,+dom.mv3Period.value];
+          const colorsMV=[dom.mv1Color.value,dom.mv2Color.value,dom.mv3Color.value];
+          periodsMV.forEach((P, idx)=>{
+            const k = crossIndex - P;
+            if(k>=0){
+              tri(ctxV, Xv(k), yTop+8, 6, colorsMV[idx], false);   // 上緣向下
+              tri(ctxV, Xv(k), yBottom-8, 6, colorsMV[idx], true); // 下緣向上
+            }
+          });
+        }
+
+        // 量圖左上角固定 Tooltip（使用 Crosshair 索引）
+        ctxV.fillStyle = '#e6edf3'; ctxV.font = '12px monospace';
+        const yi = v => (v==null || !isFinite(v)) ? '-' : (Number(v)/1e8).toFixed(2);
+        const arrow = (arr, idx) => {
+          if (!arr || idx==null || idx<=0 || !isFinite(arr[idx]) || !isFinite(arr[idx-1])) return '';
+          if (arr[idx] > arr[idx-1]) return '↑';
+          if (arr[idx] < arr[idx-1]) return '↓';
+          return '→';
+        };
+        const mvArrs=[mv1,mv2,mv3], periods=[dom.mv1Period.value,dom.mv2Period.value,dom.mv3Period.value];
+        mvArrs.forEach((arr, i)=>{
+          const t = `MV${periods[i]}: ${yi(arr[crossIndex])} 億 ${arrow(arr, crossIndex)}`;
+          ctxV.fillText(t, 10, 14 + i*14);
+        });
+      }
+    }
+
+    // 主 Tooltip（價圖左上，顯示 OHLCTV 與 MA）
+    if(hoverIndex!==null && hoverIndex<=lastVisible){
+      const i = (crosshairMode && crossIndex!=null && crossIndex<=lastVisible) ? crossIndex : hoverIndex;
+      const d = show[i];
+      const fmt = (v, dec) => (v==null || !isFinite(v)) ? '-' : Number(v).toFixed(dec);
+      const yi  = v => (v==null || !isFinite(v)) ? '-' : (Number(v)/1e8).toFixed(2);
+      dom.tooltip.innerHTML = `日期: ${d.date}\nO: ${d.o}　H: ${d.h}\nL: ${d.l}　C: ${d.c}\nV: ${yi(d.v)} 億\nMA${dom.ma1Period.value}: ${fmt(ma1[i],2)}\nMA${dom.ma2Period.value}: ${fmt(ma2[i],2)}\nMA${dom.ma3Period.value}: ${fmt(ma3[i],2)}`;
+    }else{
+      dom.tooltip.textContent = "";
+    }
+  }
+
+  function step(){ if(replayMode && cutIndex!==null){ stepCount++; draw(); } }
+  function playLoop(){
+    cancelAnimationFrame(timer);
+    interval = 1000 / (+dom.speed.value);
+    last=performance.now();
+    const tick=()=>{
+      const now=performance.now();
+      interval = 1000 / (+dom.speed.value);
+      if(playing && now-last>=interval){ last=now; step(); }
+      timer=requestAnimationFrame(tick);
+    };
+    timer=requestAnimationFrame(tick);
+  }
+
+  // 週期變更
+  dom.timeframe.addEventListener('change', () => { updateProcessedData(); draw(); });
+
+  // 設定面板開關
+  dom.settingsBtn.addEventListener('click', () => {
+    const isVisible = dom.settingsPanel.style.display === 'block';
+    dom.settingsPanel.style.display = isVisible ? 'none' : 'block';
+  });
+
+  // 設定變更即時重繪
+  [dom.ma1Period,dom.ma1Color,dom.ma1Width,dom.ma2Period,dom.ma2Color,dom.ma2Width,dom.ma3Period,dom.ma3Color,dom.ma3Width,
+   dom.mv1Period,dom.mv1Color,dom.mv1Width,dom.mv2Period,dom.mv2Color,dom.mv2Width,dom.mv3Period,dom.mv3Color,dom.mv3Width]
+   .forEach(el => el.addEventListener('input', draw));
+
+  // 範例資料
+  dom.loadData.addEventListener('click', () => { data = parseCSV(sampleData); updateProcessedData(); draw(); setStatus('已載入示例。','ok'); });
+
+  // 重新抓取
+  dom.reload.addEventListener('click', autoFetch);
+
+  // Replay 控制
+  dom.replay.addEventListener('click',()=>{
+    replayMode=!replayMode;
+    dom.replay.textContent = replayMode ? "Replay ON" : "Replay OFF";
+    dom.replay.classList.toggle("on", replayMode);
+    dom.modeLabel.style.display = replayMode ? "block" : "none";
+    if(!replayMode){cutIndex=null;stepCount=0; playing=false; dom.play.textContent='▶';}
+    draw();
+  });
+  dom.play.addEventListener('click',()=>{ if(!replayMode) return; playing=!playing; dom.play.textContent=playing?'⏸':'▶'; if(playing) playLoop(); });
+  dom.step.addEventListener('click',()=>{ if(!replayMode) return; playing=false; dom.play.textContent='▶'; step(); });
+  dom.rewind.addEventListener('click',()=>{ if(replayMode && cutIndex!==null){ stepCount=0; draw(); }});
+  dom.reset.addEventListener('click',()=>{ cutIndex=null; stepCount=0; draw(); });
+
+  // 選擇 Replay 起始點（價圖或量圖都可）
+  function setReplayStartFrom(canvas, clientX){
+    if(!replayMode) return;
+    const rect=canvas.getBoundingClientRect();
+    const x=clientX-rect.left;
+    const W=canvas.clientWidth;
+    const padL=50,padR=20;
+    const end=processedData.length-viewOffset;
+    const start=Math.max(0,end-viewSize);
+    const show=processedData.slice(start,end);
+    const n=show.length;
+    const w=(W-padL-padR)/Math.max(1,n);
+    const ci=Math.floor((x-padL)/w);
+    if(ci>=0&&ci<n){ cutIndex=ci; stepCount=0; draw(); }
+  }
+  dom.price.addEventListener('click',e=>{ setReplayStartFrom(dom.price, e.clientX); });
+  dom.volume.addEventListener('click',e=>{ setReplayStartFrom(dom.volume, e.clientX); });
+
+  // Hover 與 Crosshair 跟隨（價圖/量圖都更新 crossIndex）
+  function handleMove(canvas, e){
+    const rect=canvas.getBoundingClientRect();
+    const x=e.clientX-rect.left;
+    const y=e.clientY-rect.top;
+    const W=canvas.clientWidth;
+    const padL=50,padR=20;
+    const end=processedData.length-viewOffset;
+    const start=Math.max(0,end-viewSize);
+    const show=processedData.slice(start,end);
+    const n=show.length;
+    const w=(W-padL-padR)/Math.max(1,n);
+    const ci=Math.floor((x-padL)/w);
+    hoverIndex = (ci>=0 && ci<n)?ci:null;
+    if(crosshairMode){ crossIndex = hoverIndex; cursorY = (canvas===dom.price)? y : cursorY; }
+    draw();
+  }
+  dom.price.addEventListener('mousemove',e=>handleMove(dom.price,e));
+  dom.volume.addEventListener('mousemove',e=>handleMove(dom.volume,e));
+  dom.price.addEventListener('mouseleave',()=>{ hoverIndex=null; draw(); });
+  dom.volume.addEventListener('mouseleave',()=>{ hoverIndex=null; draw(); });
+
+  // 拖曳平移（Replay ON 時禁用）
+  dom.price.addEventListener('mousedown',e=>{
+    if(e.button!==0) return;
+    if(replayMode) return; // 禁用
+    let lastX=e.clientX;
+    function move(ev){
+      const dx=ev.clientX-lastX; lastX=ev.clientX;
+      const W=dom.price.clientWidth; const barsPerPx=viewSize/W;
+      viewOffset+=Math.round(dx*barsPerPx);
+      if(viewOffset<0)viewOffset=0;
+      if(viewOffset>Math.max(0,processedData.length-viewSize))viewOffset=Math.max(0,processedData.length-viewSize);
+      draw();
+    }
+    function up(){window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',up);}
+    window.addEventListener('mousemove',move);window.addEventListener('mouseup',up);
+  });
+
+  // 滾輪縮放（Replay ON 時禁用）
+  dom.price.addEventListener('wheel',e=>{
+    if(replayMode){ e.preventDefault(); return; }
+    e.preventDefault();
+    const delta=Math.sign(e.deltaY);
+    viewSize=Math.min(data.length,Math.max(20,viewSize+delta*10));
+    if(viewOffset>Math.max(0,data.length-viewSize))viewOffset=Math.max(0,data.length-viewSize);
+    draw();
+  });
+
+  // Crosshair 開/關（雙擊：ON->OFF, OFF->ON 並定位）
+  function indexFromCanvasX(canvas, clientX){
+    const rect=canvas.getBoundingClientRect();
+    const x=clientX-rect.left;
+    const W=canvas.clientWidth;
+    const padL=50,padR=20;
+    const end=processedData.length-viewOffset;
+    const start=Math.max(0,end-viewSize);
+    const show=processedData.slice(start,end);
+    const n=show.length;
+    const w=(W-padL-padR)/Math.max(1,n);
+    const ci=Math.floor((x-padL)/w);
+    return (ci>=0 && ci<n) ? ci : null;
+  }
+  function dblToggle(canvas, clientX){
+    if(crosshairMode){ crosshairMode=false; crossIndex=null; cursorY=null; }
+    else { const ci=indexFromCanvasX(canvas, clientX); if(ci!=null){ crosshairMode=true; crossIndex=ci; } }
+    draw();
+  }
+  dom.price.addEventListener('dblclick',e=>{ dblToggle(dom.price, e.clientX); });
+  dom.volume.addEventListener('dblclick',e=>{ dblToggle(dom.volume, e.clientX); });
+
+  // Shift+Click 也可切換
+  function shiftToggle(canvas, clientX){
+    const ci=indexFromCanvasX(canvas, clientX);
+    if(ci==null) return;
+    if(crosshairMode && crossIndex===ci){ crosshairMode=false; crossIndex=null; cursorY=null; }
+    else { crosshairMode=true; crossIndex=ci; }
+    draw();
+  }
+  dom.price.addEventListener('click',e=>{ if(e.shiftKey) shiftToggle(dom.price, e.clientX); });
+  dom.volume.addEventListener('click',e=>{ if(e.shiftKey) shiftToggle(dom.volume, e.clientX); });
+
+  // X 鍵快速切換（在目前 hover 的位置）
+  window.addEventListener('keydown',e=>{
+    if(e.key.toLowerCase()==='x'){
+      if(crosshairMode){ crosshairMode=false; crossIndex=null; cursorY=null; }
+      else if(hoverIndex!=null){ crosshairMode=true; crossIndex=hoverIndex; }
+      draw();
+    }
+  });
+
+  // 初始載入
+  window.addEventListener('resize',draw);
+  autoFetch();
+})();
+</script>
+</body>
+</html>
